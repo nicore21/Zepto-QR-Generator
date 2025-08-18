@@ -115,6 +115,46 @@ textarea::placeholder{color:rgba(255,255,255,0.7)}
 }
 .nav-btn:disabled{opacity:0.45;cursor:not-allowed}
 .index-ind{padding:6px 10px;border-radius:999px;background:rgba(0,0,0,0.18);font-weight:600}
+
+/* Suggestions styles */
+.suggestions-container {
+  width: 100%;
+  margin-top: 8px;
+  position: relative;
+}
+
+.suggestions-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  background: rgba(255,255,255,0.1);
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.1);
+  max-height: 200px;
+  overflow-y: auto;
+  backdrop-filter: blur(var(--glass-blur));
+}
+
+.suggestion-item {
+  padding: 8px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  transition: background 0.2s ease;
+}
+
+.suggestion-item:last-child {
+  border-bottom: none;
+}
+
+.suggestion-item:hover {
+  background: rgba(255,255,255,0.15);
+}
+
+.suggestion-highlight {
+  font-weight: bold;
+  color: white;
+}
+
 @media (max-width:480px){ /* Adjusted breakpoint for better wrapping */
   .btn-row{grid-template-columns:repeat(2,1fr)}
   .nav-row{gap:10px}
@@ -140,6 +180,11 @@ textarea::placeholder{color:rgba(255,255,255,0.7)}
 
     <section class="controls" aria-label="Controls">
       <textarea id="input" placeholder="Paste or type text here (each line becomes one QR)"></textarea>
+      
+      <!-- Suggestions container -->
+      <div class="suggestions-container" id="suggestionsContainer" style="display: none;">
+        <ul class="suggestions-list" id="suggestionsList"></ul>
+      </div>
       
       <!-- Button layout with APK button in the top row -->
       <div class="btn-row" style="margin-top:10px;">
@@ -179,10 +224,32 @@ textarea::placeholder{color:rgba(255,255,255,0.7)}
     </main>
   </div>
 
+<!-- Add Firebase SDKs -->
+<script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-firestore-compat.js"></script>
+
 <script>
 (function(){
   const API_BASE = 'https://generator.qrcode.studio/qr/custom';
   const LOGO_URL = 'https://i.postimg.cc/xCf6bCys/Zepto.png';
+
+  // SECURITY NOTE: This configuration is visible on the client-side, which is standard for Firebase.
+  // However, it is CRITICAL to secure your database by setting up proper Firestore Security Rules
+  // in the Firebase console to prevent unauthorized access.
+  const firebaseConfig = {
+    apiKey: "AIzaSyAME1PXnAbC_qcWxvsUQkrGcMZ9U-PQKPw",
+    authDomain: "zepto-qr.firebaseapp.com",
+    databaseURL: "https://zepto-qr-default-rtdb.firebaseio.com",
+    projectId: "zepto-qr",
+    storageBucket: "zepto-qr.firebasestorage.app",
+    messagingSenderId: "778097504076",
+    appId: "1:778097504076:web:c889233cebab20186369e9",
+    measurementId: "G-RM39Q00JZ2"
+  };
+  
+  // Initialize Firebase
+  firebase.initializeApp(firebaseConfig);
+  const db = firebase.firestore();
 
   const input = document.getElementById('input');
   const genBtn = document.getElementById('gen');
@@ -196,10 +263,14 @@ textarea::placeholder{color:rgba(255,255,255,0.7)}
   const prevBtn = document.getElementById('prev');
   const nextBtn = document.getElementById('next');
   const indexInd = document.getElementById('indexInd');
+  const suggestionsContainer = document.getElementById('suggestionsContainer');
+  const suggestionsList = document.getElementById('suggestionsList');
 
   let store = [];
   let idx = 0;
   let touchStartX = 0, touchEndX = 0;
+  let debounceTimer;
+  let lastInputValue = '';
 
   function showNotif(msg, timeout=2200){
     const n = document.createElement('div'); n.className='notif'; n.textContent=msg;
@@ -252,19 +323,138 @@ textarea::placeholder{color:rgba(255,255,255,0.7)}
     showIndex();
   }
 
-  // ✅ Spaces to underscores added here
+  // Get suggestions from Firestore based on input prefix
+  async function getSuggestions(prefix) {
+    if (!prefix || prefix.trim().length < 2) {
+      hideSuggestions();
+      return [];
+    }
+    
+    try {
+      const snapshot = await db.collection("userInputs")
+        .orderBy("text")
+        .startAt(prefix)
+        .endAt(prefix + "\uf8ff")
+        .limit(5)
+        .get();
+      
+      return snapshot.docs.map(doc => doc.data().text);
+    } catch (error) {
+      console.error("Error getting suggestions:", error);
+      return [];
+    }
+  }
+
+  // Display suggestions
+  function displaySuggestions(suggestions, prefix) {
+    if (suggestions.length === 0 || !prefix) {
+      hideSuggestions();
+      return;
+    }
+    
+    suggestionsList.innerHTML = '';
+    
+    suggestions.forEach(suggestion => {
+      const li = document.createElement('li');
+      li.className = 'suggestion-item';
+      
+      // Highlight the matching prefix
+      const index = suggestion.toLowerCase().indexOf(prefix.toLowerCase());
+      if (index >= 0) {
+        const before = suggestion.substring(0, index);
+        const match = suggestion.substring(index, index + prefix.length);
+        const after = suggestion.substring(index + prefix.length);
+        
+        li.innerHTML = `
+          ${before}<span class="suggestion-highlight">${match}</span>${after}
+        `;
+      } else {
+        li.textContent = suggestion;
+      }
+      
+      li.addEventListener('click', () => {
+        input.value = suggestion;
+        hideSuggestions();
+        input.focus();
+      });
+      
+      suggestionsList.appendChild(li);
+    });
+    
+    suggestionsContainer.style.display = 'block';
+  }
+
+  // Hide suggestions
+  function hideSuggestions() {
+    suggestionsContainer.style.display = 'none';
+  }
+
+  // Handle input changes with debounce
+  async function handleInputChange() {
+    const currentValue = input.value.trim();
+    
+    // Don't process if the value hasn't changed
+    if (currentValue === lastInputValue) return;
+    
+    lastInputValue = currentValue;
+    
+    clearTimeout(debounceTimer);
+    
+    if (currentValue.length >= 2) {
+      debounceTimer = setTimeout(async () => {
+        const suggestions = await getSuggestions(currentValue);
+        displaySuggestions(suggestions, currentValue);
+      }, 300);
+    } else {
+      hideSuggestions();
+    }
+  }
+
+  // QR Generation Function
   async function generateFromText(text){
-    const lines = text
-      .split(/\r?\n/)
-      .map(l => l.trim().replace(/\s+/g, '_'))
-      .filter(Boolean);
-    if(!lines.length) { showNotif('No text found to generate'); return; }
-    store = lines;
-    idx = 0;
-    input.value = '';
-    updateUI();
-    showNotif('QR(s) generated — use next/prev to navigate');
-    showCurrent();
+    try {
+      // First process the text into lines
+      const lines = text
+        .split(/\r?\n/)
+        .map(l => l.trim().replace(/\s+/g, '_'))
+        .filter(l => l.length > 0); // Only keep non-empty lines
+      
+      if(lines.length === 0) { 
+        showNotif('Please enter some text to generate QR codes'); 
+        return; 
+      }
+      
+      // Store the lines for QR generation
+      store = lines;
+      idx = 0;
+      
+      // Clear input and update UI
+      input.value = '';
+      updateUI();
+      
+      // Show first QR code
+      showCurrent();
+      
+      // Save the first line to Firestore for the suggestion engine (non-blocking)
+      if (lines[0].length >= 3) { // Only save meaningful inputs
+        try {
+          await db.collection("userInputs").add({
+            text: lines[0].trim(),
+            timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+            count: 1
+          });
+        } catch (error) {
+          console.error("Error saving to Firestore:", error);
+        }
+      }
+      
+      showNotif(`Generated ${lines.length} QR code(s)`);
+      hideSuggestions();
+      
+    } catch (error) {
+      console.error("QR generation error:", error);
+      showNotif('Error generating QR codes', 3000);
+    }
   }
 
   async function pasteAndGen(){
@@ -334,12 +524,20 @@ textarea::placeholder{color:rgba(255,255,255,0.7)}
     showNotif('Cleared');
   }
 
-  genBtn.addEventListener('click', ()=> generateFromText(input.value));
+  // Event listeners
+  genBtn.addEventListener('click', async () => await generateFromText(input.value));
   pasteBtn.addEventListener('click', pasteAndGen);
   downloadBtn.addEventListener('click', downloadCurrent);
   clearBtn.addEventListener('click', clearAll);
   nextBtn.addEventListener('click', next);
   prevBtn.addEventListener('click', prev);
+  
+  // Input event listeners for suggestions
+  input.addEventListener('input', handleInputChange);
+  input.addEventListener('focus', handleInputChange);
+  input.addEventListener('blur', () => {
+    setTimeout(hideSuggestions, 200);
+  });
 
   document.addEventListener('keydown', (e)=>{
     if(!store.length) return;
@@ -356,6 +554,13 @@ textarea::placeholder{color:rgba(255,255,255,0.7)}
     else if(touchEndX > touchStartX + 50) prev();
     touchStartX = touchEndX = 0;
   }
+
+  // Click outside to hide suggestions
+  document.addEventListener('click', (e) => {
+    if (!suggestionsContainer.contains(e.target) && e.target !== input) {
+      hideSuggestions();
+    }
+  });
 
   (async function init(){
     updateUI();
