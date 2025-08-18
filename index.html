@@ -372,10 +372,14 @@ textarea::placeholder{color:rgba(255,255,255,0.7)}
         li.textContent = suggestion;
       }
       
-      li.addEventListener('click', () => {
-        input.value = suggestion;
+      li.addEventListener('click', async () => {
+        // Set the input value for user clarity, though generateFromText will clear it.
+        input.value = suggestion; 
         hideSuggestions();
-        input.focus();
+        
+        // --- MODIFIED ---
+        // Automatically generate the QR code for the selected suggestion.
+        await generateFromText(suggestion); 
       });
       
       suggestionsList.appendChild(li);
@@ -438,11 +442,17 @@ textarea::placeholder{color:rgba(255,255,255,0.7)}
       // Save the first line to Firestore for the suggestion engine (non-blocking)
       if (lines[0].length >= 3) { // Only save meaningful inputs
         try {
-          await db.collection("userInputs").add({
-            text: lines[0].trim(),
-            timestamp: firebase.firestore.FieldValue.serverTimestamp(),
-            count: 1
-          });
+          // Check if this input already exists to avoid duplicates from suggestions
+          const query = db.collection("userInputs").where("text", "==", lines[0].trim());
+          const existing = await query.get();
+
+          if(existing.empty){
+             await db.collection("userInputs").add({
+              text: lines[0].trim(),
+              timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+              count: 1
+            });
+          }
         } catch (error) {
           console.error("Error saving to Firestore:", error);
         }
@@ -536,6 +546,7 @@ textarea::placeholder{color:rgba(255,255,255,0.7)}
   input.addEventListener('input', handleInputChange);
   input.addEventListener('focus', handleInputChange);
   input.addEventListener('blur', () => {
+    // Delay hiding so that the click event on a suggestion can fire
     setTimeout(hideSuggestions, 200);
   });
 
