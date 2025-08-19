@@ -4,9 +4,9 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <meta name="google-site-verification" content="KROUWRe-zWaSqvao4BWmgbO70GZiy6pzlwuktRu9JEk" />
-<meta name="description" content="Generate custom and dynamic QR codes with a logo for free. Use the Zepot QR code generator to create QR codes for text, links, and more. Scan and download your QR codes easily." />
+<meta name="description" content="Generate custom and dynamic QR codes with a logo for free. Use the Zepto QR code generator to create QR codes for text, links, and more. Scan and download your QR codes easily." />
 <meta name="keywords" content="zepto qr code generator, zepto bag qr code generator, zepto dynamic qr code generator, generate dynamic qr, zepto qr code scan" />
-<title>Zepot QR Generator</title>
+<title>Zepto QR Generator</title>
 <meta name="monetag" content="4de9ba02af98344c39ef7e44a27a6bac">
 <style>
 :root{
@@ -92,6 +92,34 @@ textarea::placeholder{color:rgba(255,255,255,0.7)}
   animation: btn-glow 2s infinite ease-in-out;
 }
 
+/* Suggestions styles */
+.suggestions-chips-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.suggestion-chip {
+  background: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: var(--white);
+  padding: 6px 12px;
+  border-radius: 16px;
+  cursor: pointer;
+  transition: background-color 0.2s ease, transform 0.1s ease;
+  font-size: 13px;
+}
+
+.suggestion-chip:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.suggestion-chip:active {
+    transform: scale(0.95);
+}
+
+
 .preview-wrap{
   display:flex;flex-direction:column;align-items:center;gap:12px;
 }
@@ -172,13 +200,20 @@ textarea::placeholder{color:rgba(255,255,255,0.7)}
   <div class="app" role="application" aria-labelledby="appTitle">
     <header class="header">
       <div class="logo" aria-hidden="true">
-        <img src="https://i.postimg.cc/PJ4gg9fx/Zepto-id-Hv-TFe5-Uh-0.jpg" alt="Zepot Logo" style="width:48px; height:48px; border-radius:10px;">
+        <img src="https://i.postimg.cc/PJ4gg9fx/Zepto-id-Hv-TFe5-Uh-0.jpg" alt="Zepto Logo" style="width:48px; height:48px; border-radius:10px;">
       </div>
-      <h1 id="appTitle">Zepot QR Generator</h1>
+      <h1 id="appTitle">Zepto QR Generator</h1>
       <div class="subtitle">Generate custom QR codes with a logo from your text.</div>
     </header>
 
     <section class="controls" aria-label="Controls">
+        <div class="suggestions-chips-container">
+            <button class="suggestion-chip">NAS_SRB</button>
+            <button class="suggestion-chip">NAS_IB</button>
+            <button class="suggestion-chip">MUM_SRB</button>
+            <button class="suggestion-chip">MUM_IB</button>
+            <button class="suggestion-chip">ZEB_RB</button>
+        </div>
       <textarea id="input" placeholder="Paste or type text here (each line becomes one QR)"></textarea>
       
       <!-- Suggestions container -->
@@ -265,6 +300,8 @@ textarea::placeholder{color:rgba(255,255,255,0.7)}
   const indexInd = document.getElementById('indexInd');
   const suggestionsContainer = document.getElementById('suggestionsContainer');
   const suggestionsList = document.getElementById('suggestionsList');
+  const suggestionChips = document.querySelectorAll('.suggestion-chip');
+
 
   let store = [];
   let idx = 0;
@@ -358,28 +395,23 @@ textarea::placeholder{color:rgba(255,255,255,0.7)}
       const li = document.createElement('li');
       li.className = 'suggestion-item';
       
-      // Highlight the matching prefix
       const index = suggestion.toLowerCase().indexOf(prefix.toLowerCase());
       if (index >= 0) {
         const before = suggestion.substring(0, index);
         const match = suggestion.substring(index, index + prefix.length);
         const after = suggestion.substring(index + prefix.length);
         
-        li.innerHTML = `
-          ${before}<span class="suggestion-highlight">${match}</span>${after}
-        `;
+        li.innerHTML = `${before}<span class="suggestion-highlight">${match}</span>${after}`;
       } else {
         li.textContent = suggestion;
       }
       
-      li.addEventListener('click', async () => {
-        // Set the input value for user clarity, though generateFromText will clear it.
+      // --- MODIFIED BEHAVIOR ---
+      // When a suggestion is clicked, just populate the input field. Do NOT generate QR automatically.
+      li.addEventListener('click', () => {
         input.value = suggestion; 
         hideSuggestions();
-        
-        // --- MODIFIED ---
-        // Automatically generate the QR code for the selected suggestion.
-        await generateFromText(suggestion); 
+        input.focus(); // Return focus to the input field
       });
       
       suggestionsList.appendChild(li);
@@ -396,10 +428,7 @@ textarea::placeholder{color:rgba(255,255,255,0.7)}
   // Handle input changes with debounce
   async function handleInputChange() {
     const currentValue = input.value.trim();
-    
-    // Don't process if the value hasn't changed
     if (currentValue === lastInputValue) return;
-    
     lastInputValue = currentValue;
     
     clearTimeout(debounceTimer);
@@ -417,32 +446,25 @@ textarea::placeholder{color:rgba(255,255,255,0.7)}
   // QR Generation Function
   async function generateFromText(text){
     try {
-      // First process the text into lines
       const lines = text
         .split(/\r?\n/)
         .map(l => l.trim().replace(/\s+/g, '_'))
-        .filter(l => l.length > 0); // Only keep non-empty lines
+        .filter(l => l.length > 0);
       
       if(lines.length === 0) { 
         showNotif('Please enter some text to generate QR codes'); 
         return; 
       }
       
-      // Store the lines for QR generation
       store = lines;
       idx = 0;
       
-      // Clear input and update UI
-      input.value = '';
+      input.value = ''; // Clear input after generating
       updateUI();
-      
-      // Show first QR code
       showCurrent();
       
-      // Save the first line to Firestore for the suggestion engine (non-blocking)
-      if (lines[0].length >= 3) { // Only save meaningful inputs
+      if (lines[0].length >= 3) {
         try {
-          // Check if this input already exists to avoid duplicates from suggestions
           const query = db.collection("userInputs").where("text", "==", lines[0].trim());
           const existing = await query.get();
 
@@ -485,17 +507,11 @@ textarea::placeholder{color:rgba(255,255,255,0.7)}
   async function tryAutoClipboard(){
     try{
       if(navigator.permissions){
-        try {
-          const perm = await navigator.permissions.query({name:'clipboard-read'});
-          if(perm.state === 'granted'){
-            const t = await navigator.clipboard.readText();
-            if(t && t.trim()){ await generateFromText(t); showNotif('Auto-generated from clipboard'); return; }
-          }
-        } catch(e){}
-      }
-      if(navigator.clipboard){
-        const t = await navigator.clipboard.readText().catch(()=>null);
-        if(t && t.trim()){ await generateFromText(t); showNotif('Auto-generated from clipboard'); }
+        const perm = await navigator.permissions.query({name:'clipboard-read'}).catch(()=>null);
+        if(perm && perm.state === 'granted'){
+          const t = await navigator.clipboard.readText();
+          if(t && t.trim()){ await generateFromText(t); showNotif('Auto-generated from clipboard'); return; }
+        }
       }
     } catch(e){}
   }
@@ -528,6 +544,7 @@ textarea::placeholder{color:rgba(255,255,255,0.7)}
 
   function clearAll(){
     store = []; idx = 0;
+    input.value = '';
     qrImg.src = '';
     caption.textContent = '';
     updateUI();
@@ -542,11 +559,23 @@ textarea::placeholder{color:rgba(255,255,255,0.7)}
   nextBtn.addEventListener('click', next);
   prevBtn.addEventListener('click', prev);
   
+  // Chip click handler: Appends text to the input field
+  suggestionChips.forEach(chip => {
+    chip.addEventListener('click', () => {
+        const chipText = chip.textContent;
+        if (input.value.trim().length > 0) {
+            input.value += '\n' + chipText;
+        } else {
+            input.value = chipText;
+        }
+        input.focus();
+    });
+  });
+
   // Input event listeners for suggestions
   input.addEventListener('input', handleInputChange);
   input.addEventListener('focus', handleInputChange);
   input.addEventListener('blur', () => {
-    // Delay hiding so that the click event on a suggestion can fire
     setTimeout(hideSuggestions, 200);
   });
 
@@ -566,7 +595,6 @@ textarea::placeholder{color:rgba(255,255,255,0.7)}
     touchStartX = touchEndX = 0;
   }
 
-  // Click outside to hide suggestions
   document.addEventListener('click', (e) => {
     if (!suggestionsContainer.contains(e.target) && e.target !== input) {
       hideSuggestions();
